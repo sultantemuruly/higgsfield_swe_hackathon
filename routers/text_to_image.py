@@ -27,7 +27,7 @@ class InputImage(BaseModel):
     image_url: HttpUrl = Field(..., description="Publicly accessible image URL")
 
 
-class NanoBananaParams(BaseModel):
+class ModelParams(BaseModel):
     prompt: str = Field(..., description="Text prompt")
     aspect_ratio: str = Field("4:3", description="e.g., '4:3', '1:1', '16:9'")
     input_images: list[InputImage] | None = Field(
@@ -45,8 +45,24 @@ def higgsfield_headers() -> dict:
 
 
 @router.post("/nano-banana")
-async def generate_nano_banana(params: NanoBananaParams):
+async def generate_nano_banana(params: ModelParams):
     url = "https://platform.higgsfield.ai/v1/text2image/nano-banana"
+    payload = {"params": jsonable_encoder(params, exclude_none=True)}
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, headers=higgsfield_headers(), json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@router.post("/seedream")
+async def generate_seedream(params: ModelParams):
+    url = "https://platform.higgsfield.ai/v1/text2image/seedream"
     payload = {"params": jsonable_encoder(params, exclude_none=True)}
 
     try:
