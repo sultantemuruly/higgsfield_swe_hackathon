@@ -41,7 +41,6 @@ async def generate_minimax_t2v(params: ModelParams):
     """
     url = "https://platform.higgsfield.ai/generate/minimax-t2v"
     payload = {"params": params.model_dump()}
-
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(url, headers=higgsfield_headers(), json=payload)
@@ -55,10 +54,8 @@ async def generate_minimax_t2v(params: ModelParams):
 
 @router.post("/seedance-v1-lite-t2v")
 async def generate_minimax_t2v(params: ModelParams):
-
     url = "https://platform.higgsfield.ai/generate/seedance-v1-lite-t2v"
     payload = {"params": params.model_dump()}
-
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(url, headers=higgsfield_headers(), json=payload)
@@ -118,29 +115,23 @@ async def wait_and_redirect_video(
     job_set_id: str, timeout: int = 180, interval: float = 3.0
 ):
     """
-    Polls Higgsfield until the job-set is completed (<= timeout seconds),
-    then 307-redirects to the video URL.
+    Polls Higgsfield until the job-set is completed (<= timeout seconds), then 307-redirects to the video URL.
     """
     status_url = f"https://platform.higgsfield.ai/v1/job-sets/{job_set_id}"
-
     async with httpx.AsyncClient(timeout=30) as client:
         attempts = max(1, int(timeout / interval))
         for _ in range(attempts):
             r = await client.get(status_url, headers=higgsfield_headers())
             r.raise_for_status()
             data = r.json()
-
             vid_url = _pick_video_url(data)
             if vid_url:
                 return RedirectResponse(url=vid_url, status_code=307)
-
             # bail out early on failure
             for j in data.get("jobs", []):
                 if j.get("status") in {"failed", "error"}:
                     raise HTTPException(status_code=502, detail="Generation failed")
-
             await asyncio.sleep(interval)
-
     raise HTTPException(
         status_code=202,
         detail="Video not ready yet. Keep polling or increase timeout.",
