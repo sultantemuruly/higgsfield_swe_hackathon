@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import RedirectResponse, StreamingResponse
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 # ---------- env ----------
 load_dotenv()
@@ -20,28 +20,20 @@ if not HIGGSFIELD_API_KEY_ID or not HIGGSFIELD_API_KEY_SECRET:
     )
 
 # ---------- router ----------
-router = APIRouter(prefix="/text-to-image", tags=["text2image"])
+router = APIRouter(prefix="/text-to-video", tags=["text2video"])
 
 
 # ---------- models ----------
-class InputImage(BaseModel):
-    type: Literal["image_url"] = Field(
-        default="image_url",
-        description="Image source type. Currently supports only 'image_url'.",
-    )
-    image_url: HttpUrl = Field(..., description="Publicly accessible image URL")
-
-
 class ModelParams(BaseModel):
     prompt: str = Field(..., description="Text prompt")
-    aspect_ratio: str = Field("4:3", description="e.g., '4:3', '1:1', '16:9'")
-    input_images: list[InputImage] | None = Field(
-        None, description="Optional list of input images"
-    )
+    duration: int = Field(6, description="Clip length in seconds")
+    resolution: str = Field("768", description="Video side length, e.g. 576, 720, 768")
+    # keep upstream spelling
+    enable_prompt_optimizier: bool = Field(True, description="Enable prompt optimizer")
 
 
-class GenerateImageRequest(BaseModel):
-    model: Literal["nano-banana", "seedream"]
+class GenerateVideoRequest(BaseModel):
+    model: Literal["minimax-t2v", "seedance-v1-lite-t2v"]
     params: ModelParams
 
 
@@ -55,41 +47,58 @@ def higgsfield_headers() -> dict:
     }
 
 
-def _pick_image_url(data: dict) -> str | None:
+def _pick_video_url(data: dict) -> str | None:
     """
-    Extract first usable image URL from a Higgsfield job-set payload.
-    Prefers full-res 'raw.url', then 'min.url', then 'url'.
+    Extract first likely video URL from a Higgsfield job-set payload.
+    Tries: results.video.url, results.video_url, results.raw.url, results.min.url, results.url.
     """
+
+    def from_results(res: dict) -> str | None:
+        candidates = [
+            (res.get("video") or {}).get("url"),
+            res.get("video_url"),
+            (res.get("raw") or {}).get("url"),
+            (res.get("min") or {}).get("url"),
+            res.get("url"),
+        ]
+        for u in candidates:
+            if isinstance(u, str) and u.startswith("http"):
+                # prefer known video extensions
+                if any(
+                    u.lower().endswith(ext) for ext in (".mp4", ".webm", ".mov", ".m4v")
+                ):
+                    return u
+        # fallback: first http-like string anywhere at top level
+        for v in res.values():
+            if isinstance(v, str) and v.startswith("http"):
+                return v
+        return None
+
     for j in data.get("jobs", []):
         res = j.get("results")
         if not res:
             continue
         if isinstance(res, dict):
-            return (
-                (res.get("raw") or {}).get("url")
-                or (res.get("min") or {}).get("url")
-                or res.get("url")
-            )
-        if isinstance(res, list):
+            u = from_results(res)
+            if u:
+                return u
+        elif isinstance(res, list):
             for item in res:
-                url = (
-                    (item.get("raw") or {}).get("url")
-                    or (item.get("min") or {}).get("url")
-                    or item.get("url")
-                )
-                if url:
-                    return url
+                if isinstance(item, dict):
+                    u = from_results(item)
+                    if u:
+                        return u
     return None
 
 
-async def _poll_image_url(
+async def _poll_video_url(
     client: httpx.AsyncClient,
     job_set_id: str,
-    timeout: int = 75,
-    interval: float = 2.0,
+    timeout: int = 180,
+    interval: float = 3.0,
 ) -> str | None:
     """
-    Poll job-set until an image URL appears or timeout is reached.
+    Poll job-set until a video URL appears or timeout is reached.
     Raises HTTPException on upstream failure.
     """
     status_url = f"https://platform.higgsfield.ai/v1/job-sets/{job_set_id}"
@@ -100,9 +109,9 @@ async def _poll_image_url(
         r.raise_for_status()
         data = r.json()
 
-        img_url = _pick_image_url(data)
-        if img_url:
-            return img_url
+        vid_url = _pick_video_url(data)
+        if vid_url:
+            return vid_url
 
         for j in data.get("jobs", []):
             if j.get("status") in {"failed", "error"}:
@@ -116,9 +125,9 @@ async def _poll_image_url(
 
 
 # ---------- optional: model-specific endpoints ----------
-@router.post("/nano-banana")
-async def generate_nano_banana(params: ModelParams):
-    url = "https://platform.higgsfield.ai/v1/text2image/nano-banana"
+@router.post("/minimax-t2v")
+async def generate_minimax_t2v(params: ModelParams):
+    url = "https://platform.higgsfield.ai/generate/minimax-t2v"
     payload = {"params": jsonable_encoder(params, exclude_none=True)}
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -131,9 +140,9 @@ async def generate_nano_banana(params: ModelParams):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/seedream")
-async def generate_seedream(params: ModelParams):
-    url = "https://platform.higgsfield.ai/v1/text2image/seedream"
+@router.post("/seedance-v1-lite-t2v")
+async def generate_seedance_v1_lite_t2v(params: ModelParams):
+    url = "https://platform.higgsfield.ai/generate/seedance-v1-lite-t2v"
     payload = {"params": jsonable_encoder(params, exclude_none=True)}
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -147,13 +156,13 @@ async def generate_seedream(params: ModelParams):
 
 
 # ---------- legacy poll+redirect (kept for completeness; not needed for Swagger) ----------
-@router.get("/jobs/{job_set_id}/wait-image")
-async def wait_and_redirect_image(
-    job_set_id: str, timeout: int = 75, interval: float = 2.0
+@router.get("/jobs/{job_set_id}/wait-video")
+async def wait_and_redirect_video(
+    job_set_id: str, timeout: int = 180, interval: float = 3.0
 ):
     """
     Polls Higgsfield until the job-set is completed (<= timeout seconds),
-    then 307-redirects to the image URL.
+    then 307-redirects to the video URL.
     """
     status_url = f"https://platform.higgsfield.ai/v1/job-sets/{job_set_id}"
     async with httpx.AsyncClient(timeout=30) as client:
@@ -163,9 +172,9 @@ async def wait_and_redirect_image(
             r.raise_for_status()
             data = r.json()
 
-            img_url = _pick_image_url(data)
-            if img_url:
-                return RedirectResponse(url=img_url, status_code=307)
+            vid_url = _pick_video_url(data)
+            if vid_url:
+                return RedirectResponse(url=vid_url, status_code=307)
 
             for j in data.get("jobs", []):
                 if j.get("status") in {"failed", "error"}:
@@ -174,24 +183,24 @@ async def wait_and_redirect_image(
             await asyncio.sleep(interval)
 
     raise HTTPException(
-        status_code=202, detail="Image not ready yet. Keep polling or increase timeout."
+        status_code=202, detail="Video not ready yet. Keep polling or increase timeout."
     )
 
 
 # ---------- unified JSON endpoint (no redirects) ----------
 @router.post("/generate")
-async def generate_image(
-    body: GenerateImageRequest,
-    timeout: int = 75,
-    interval: float = 2.0,
+async def generate_video(
+    body: GenerateVideoRequest,
+    timeout: int = 180,
+    interval: float = 3.0,
 ):
     """
-    One-call image generation:
-    - Submits to /v1/text2image/{model}
-    - Polls /v1/job-sets/{id} until an image URL appears or timeout
-    - Returns JSON with image_url and job_set_id (no redirects)
+    One-call text-to-video:
+    - Submits to /generate/{model}
+    - Polls /v1/job-sets/{id} until a video URL appears or timeout
+    - Returns JSON with video_url and job_set_id (no redirects)
     """
-    submit_url = f"https://platform.higgsfield.ai/v1/text2image/{body.model}"
+    submit_url = f"https://platform.higgsfield.ai/generate/{body.model}"
     payload = {"params": jsonable_encoder(body.params, exclude_none=True)}
 
     job_set_id = None
@@ -202,17 +211,17 @@ async def generate_image(
             )
             submit.raise_for_status()
             job_set = submit.json()
-            job_set_id = job_set.get("id")
+            job_set_id = job_set.get("id") or (job_set.get("data") or {}).get("id")
             if not job_set_id:
                 raise HTTPException(status_code=502, detail="No job_set id in response")
 
-            img_url = await _poll_image_url(client, job_set_id, timeout, interval)
-            if img_url:
+            vid_url = await _poll_video_url(client, job_set_id, timeout, interval)
+            if vid_url:
                 return {
                     "status": "ready",
                     "model": body.model,
                     "job_set_id": job_set_id,
-                    "image_url": img_url,
+                    "video_url": vid_url,
                 }
 
     except httpx.HTTPStatusError as e:
@@ -226,7 +235,7 @@ async def generate_image(
     raise HTTPException(
         status_code=202,
         detail={
-            "message": "Image not ready yet. Increase timeout or try again.",
+            "message": "Video not ready yet. Increase timeout or try again.",
             "job_set_id": job_set_id,
             "model": body.model,
         },
@@ -237,58 +246,58 @@ async def generate_image(
 @router.post(
     "/generate/bytes",
     responses={
-        200: {"content": {"image/*": {}}, "description": "Generated image"},
+        200: {"content": {"video/*": {}}, "description": "Generated video"},
         202: {"description": "Generation still in progress"},
         502: {"description": "Upstream generation failed"},
     },
 )
-async def generate_image_bytes(
-    body: GenerateImageRequest,
-    timeout: int = 75,
-    interval: float = 2.0,
+async def generate_video_bytes(
+    body: GenerateVideoRequest,
+    timeout: int = 180,
+    interval: float = 3.0,
 ):
     """
-    Submit -> poll -> fetch the image URL -> stream bytes back with image/* content-type.
+    Submit -> poll -> fetch the video URL -> stream bytes back with video/* content-type.
     Works cleanly in Swagger UI (no cross-origin redirects).
     """
-    submit_url = f"https://platform.higgsfield.ai/v1/text2image/{body.model}"
+    submit_url = f"https://platform.higgsfield.ai/generate/{body.model}"
     payload = {"params": jsonable_encoder(body.params, exclude_none=True)}
 
     job_set_id = None
     try:
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
             # 1) submit
             submit = await client.post(
                 submit_url, headers=higgsfield_headers(), json=payload
             )
             submit.raise_for_status()
             job_set = submit.json()
-            job_set_id = job_set.get("id")
+            job_set_id = job_set.get("id") or (job_set.get("data") or {}).get("id")
             if not job_set_id:
                 raise HTTPException(status_code=502, detail="No job_set id in response")
 
             # 2) poll
-            img_url = await _poll_image_url(client, job_set_id, timeout, interval)
-            if not img_url:
+            vid_url = await _poll_video_url(client, job_set_id, timeout, interval)
+            if not vid_url:
                 raise HTTPException(
                     status_code=202,
                     detail={
-                        "message": "Image not ready yet. Try again or increase timeout.",
+                        "message": "Video not ready yet. Try again or increase timeout.",
                         "job_set_id": job_set_id,
                         "model": body.model,
                     },
                 )
 
-            # 3) fetch image and stream back
-            img_res = await client.get(img_url, follow_redirects=True)
-            img_res.raise_for_status()
-            media = img_res.headers.get("content-type", "image/jpeg")
+            # 3) fetch video and stream back
+            proxied = await client.get(vid_url, follow_redirects=True)
+            proxied.raise_for_status()
+            media = proxied.headers.get("content-type") or "video/mp4"
             return StreamingResponse(
-                io.BytesIO(img_res.content),
-                media_type=media,
+                io.BytesIO(proxied.content),
+                media_type=media if media.startswith("video/") else "video/mp4",
                 headers={
                     "Cache-Control": "public, max-age=31536000",
-                    "Content-Disposition": 'inline; filename="generated-image"',
+                    "Content-Disposition": 'inline; filename="generated-video"',
                 },
             )
 
