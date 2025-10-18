@@ -4,7 +4,9 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Literal
 
 load_dotenv()
 
@@ -17,11 +19,20 @@ if not HIGGSFIELD_API_KEY_ID or not HIGGSFIELD_API_KEY_SECRET:
 router = APIRouter()
 
 
+class InputImage(BaseModel):
+    type: Literal["image_url"] = Field(
+        default="image_url",
+        description="Image source type. Currently supports only 'image_url'.",
+    )
+    image_url: HttpUrl = Field(..., description="Publicly accessible image URL")
+
+
 class NanoBananaParams(BaseModel):
     prompt: str = Field(..., description="Text prompt")
     aspect_ratio: str = Field("4:3", description="e.g., '4:3', '1:1', '16:9'")
-    # make it optional so callers don’t have to pass []
-    input_images: list[str] = Field(default_factory=list)
+    input_images: list[InputImage] | None = Field(
+        None, description="Optional list of input images"
+    )
 
 
 def higgsfield_headers() -> dict:
@@ -36,7 +47,7 @@ def higgsfield_headers() -> dict:
 @router.post("/nano-banana")
 async def generate_nano_banana(params: NanoBananaParams):
     url = "https://platform.higgsfield.ai/v1/text2image/nano-banana"
-    payload = {"params": params.model_dump()}
+    payload = {"params": jsonable_encoder(params, exclude_none=True)}
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
