@@ -17,7 +17,7 @@ if not HIGGSFIELD_API_KEY_ID or not HIGGSFIELD_API_KEY_SECRET:
 router = APIRouter()
 
 
-class MinimaxT2VParams(BaseModel):
+class ModelParams(BaseModel):
     prompt: str = Field(..., description="Text prompt")
     duration: int = Field(6, description="Clip length in seconds")
     resolution: str = Field("768", description="Video side length, e.g. 576, 720, 768")
@@ -34,7 +34,7 @@ def higgsfield_headers() -> dict:
 
 
 @router.post("/minimax-t2v")
-async def generate_minimax_t2v(params: MinimaxT2VParams):
+async def generate_minimax_t2v(params: ModelParams):
     """
     Submit a text-to-video job to MiniMax T2V.
     Returns the job-set JSON (contains job_set_id you can poll).
@@ -52,6 +52,21 @@ async def generate_minimax_t2v(params: MinimaxT2VParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/seedance-v1-lite-t2v")
+async def generate_minimax_t2v(params: ModelParams):
+
+    url = "https://platform.higgsfield.ai/generate/seedance-v1-lite-t2v"
+    payload = {"params": params.model_dump()}
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, headers=higgsfield_headers(), json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def _pick_video_url(data: dict) -> str | None:
     """
