@@ -10,41 +10,71 @@ load_dotenv()
 # You can add your OpenAI API key or other AI service API key here
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-router = APIRouter()
+router = APIRouter(prefix="/ad_ideas", tags=["ad_ideas"])
 
 
 class CompanyInfo(BaseModel):
     name: str = Field(..., description="Company name")
     industry: str = Field(..., description="Industry or sector the company operates in")
-    target_audience: str = Field(..., description="Primary target audience for the company")
-    brand_values: Optional[List[str]] = Field(default=[], description="Core brand values and principles")
-    company_size: Optional[str] = Field(default="", description="Company size (startup, SME, enterprise, etc.)")
-    market_position: Optional[str] = Field(default="", description="Market position (leader, challenger, niche, etc.)")
+    target_audience: str = Field(
+        ..., description="Primary target audience for the company"
+    )
+    brand_values: Optional[List[str]] = Field(
+        default=[], description="Core brand values and principles"
+    )
+    company_size: Optional[str] = Field(
+        default="", description="Company size (startup, SME, enterprise, etc.)"
+    )
+    market_position: Optional[str] = Field(
+        default="", description="Market position (leader, challenger, niche, etc.)"
+    )
 
 
 class ProductInfo(BaseModel):
     name: str = Field(..., description="Product or service name")
-    description: str = Field(..., description="Detailed description of the product/service")
-    key_features: List[str] = Field(..., description="Key features and benefits of the product")
-    price_range: Optional[str] = Field(default="", description="Price range or pricing model")
-    unique_selling_points: Optional[List[str]] = Field(default=[], description="What makes this product unique")
-    use_cases: Optional[List[str]] = Field(default=[], description="Main use cases or applications")
+    description: str = Field(
+        ..., description="Detailed description of the product/service"
+    )
+    key_features: List[str] = Field(
+        ..., description="Key features and benefits of the product"
+    )
+    price_range: Optional[str] = Field(
+        default="", description="Price range or pricing model"
+    )
+    unique_selling_points: Optional[List[str]] = Field(
+        default=[], description="What makes this product unique"
+    )
+    use_cases: Optional[List[str]] = Field(
+        default=[], description="Main use cases or applications"
+    )
 
 
 class AdIdeasRequest(BaseModel):
     company: CompanyInfo = Field(..., description="Company information")
     product: ProductInfo = Field(..., description="Product information")
-    ad_objective: Optional[str] = Field(default="brand awareness", description="Primary objective (brand awareness, sales, engagement, etc.)")
-    budget_range: Optional[str] = Field(default="", description="Budget range for the campaign")
-    preferred_channels: Optional[List[str]] = Field(default=[], description="Preferred advertising channels (social media, TV, print, etc.)")
+    ad_objective: Optional[str] = Field(
+        default="brand awareness",
+        description="Primary objective (brand awareness, sales, engagement, etc.)",
+    )
+    budget_range: Optional[str] = Field(
+        default="", description="Budget range for the campaign"
+    )
+    preferred_channels: Optional[List[str]] = Field(
+        default=[],
+        description="Preferred advertising channels (social media, TV, print, etc.)",
+    )
 
 
 class AdIdea(BaseModel):
     title: str = Field(..., description="Creative title for the ad idea")
     concept: str = Field(..., description="Detailed concept description")
-    target_audience: str = Field(..., description="Specific target audience for this idea")
+    target_audience: str = Field(
+        ..., description="Specific target audience for this idea"
+    )
     key_message: str = Field(..., description="Main message to communicate")
-    visual_suggestions: List[str] = Field(..., description="Visual elements and style suggestions")
+    visual_suggestions: List[str] = Field(
+        ..., description="Visual elements and style suggestions"
+    )
     call_to_action: str = Field(..., description="Suggested call to action")
     channels: List[str] = Field(..., description="Recommended advertising channels")
     estimated_impact: str = Field(..., description="Expected impact and benefits")
@@ -55,14 +85,22 @@ class AdIdeasResponse(BaseModel):
     summary: str = Field(..., description="Summary of the campaign strategy")
 
 
-def generate_ad_ideas_with_openai(company: CompanyInfo, product: ProductInfo, ad_objective: str, budget_range: str, preferred_channels: List[str]) -> AdIdeasResponse:
+def generate_ad_ideas_with_openai(
+    company: CompanyInfo,
+    product: ProductInfo,
+    ad_objective: str,
+    budget_range: str,
+    preferred_channels: List[str],
+) -> AdIdeasResponse:
     """
     Generate advertising ideas using OpenAI API
     """
     if not OPENAI_API_KEY:
         # Fallback to mock data if no API key is provided
-        return generate_mock_ad_ideas(company, product, ad_objective, budget_range, preferred_channels)
-    
+        return generate_mock_ad_ideas(
+            company, product, ad_objective, budget_range, preferred_channels
+        )
+
     prompt = f"""
     You are a creative advertising strategist. Generate 5 innovative advertising ideas for the following company and product:
 
@@ -103,29 +141,42 @@ def generate_ad_ideas_with_openai(company: CompanyInfo, product: ProductInfo, ad
     try:
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         payload = {
             "model": "gpt-3.5-turbo",
             "messages": [
-                {"role": "system", "content": "You are a creative advertising strategist. Always respond with valid JSON format."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "You are a creative advertising strategist. Always respond with valid JSON format.",
+                },
+                {"role": "user", "content": prompt},
             ],
             "max_tokens": 2000,
-            "temperature": 0.8
+            "temperature": 0.8,
         }
 
         # Note: This would require httpx.AsyncClient for async implementation
         # For now, we'll use the mock implementation
-        return generate_mock_ad_ideas(company, product, ad_objective, budget_range, preferred_channels)
-        
+        return generate_mock_ad_ideas(
+            company, product, ad_objective, budget_range, preferred_channels
+        )
+
     except Exception as e:
         # Fallback to mock data on error
-        return generate_mock_ad_ideas(company, product, ad_objective, budget_range, preferred_channels)
+        return generate_mock_ad_ideas(
+            company, product, ad_objective, budget_range, preferred_channels
+        )
 
 
-def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_objective: str, budget_range: str, preferred_channels: List[str]) -> AdIdeasResponse:
+def generate_mock_ad_ideas(
+    company: CompanyInfo,
+    product: ProductInfo,
+    ad_objective: str,
+    budget_range: str,
+    preferred_channels: List[str],
+) -> AdIdeasResponse:
     """
     Generate mock advertising ideas when AI service is not available
     """
@@ -140,11 +191,11 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
                 "Close-up shots of product features",
                 "Diverse people using the product",
                 "Modern, clean aesthetic",
-                "Bold, vibrant colors"
+                "Bold, vibrant colors",
             ],
             call_to_action="Experience the difference today",
             channels=["Social Media", "Digital Display", "Video Ads"],
-            estimated_impact="High engagement and brand recall"
+            estimated_impact="High engagement and brand recall",
         ),
         AdIdea(
             title=f"The {company.name} Advantage",
@@ -156,11 +207,11 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
                 "Company headquarters/branding",
                 "Product in professional settings",
                 "Trust indicators (certifications, awards)",
-                "Professional, corporate styling"
+                "Professional, corporate styling",
             ],
             call_to_action="Join our community of satisfied customers",
             channels=["LinkedIn", "Industry Publications", "Email Marketing"],
-            estimated_impact="Strong brand trust and lead generation"
+            estimated_impact="Strong brand trust and lead generation",
         ),
         AdIdea(
             title=f"Unlock Your Potential with {product.name}",
@@ -172,11 +223,11 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
                 "Product in action",
                 "Motivational messaging",
                 "Aspirational lifestyle shots",
-                "Dynamic, energetic visuals"
+                "Dynamic, energetic visuals",
             ],
             call_to_action="Start your journey to success",
             channels=["Instagram", "YouTube", "TikTok"],
-            estimated_impact="High emotional engagement and conversions"
+            estimated_impact="High emotional engagement and conversions",
         ),
         AdIdea(
             title=f"Smart Choice: {product.name}",
@@ -188,11 +239,11 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
                 "Comparison charts",
                 "Product specifications",
                 "Clean, technical design",
-                "Professional color scheme"
+                "Professional color scheme",
             ],
             call_to_action="Make the smart choice today",
             channels=["Google Ads", "Industry Websites", "Trade Publications"],
-            estimated_impact="High conversion rates and qualified leads"
+            estimated_impact="High conversion rates and qualified leads",
         ),
         AdIdea(
             title=f"Behind the Scenes: {product.name}",
@@ -204,12 +255,12 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
                 "Team members at work",
                 "Quality control processes",
                 "Raw materials and craftsmanship",
-                "Authentic, documentary style"
+                "Authentic, documentary style",
             ],
             call_to_action="Discover our story",
             channels=["YouTube", "Company Blog", "Social Media Stories"],
-            estimated_impact="Strong brand loyalty and emotional connection"
-        )
+            estimated_impact="Strong brand loyalty and emotional connection",
+        ),
     ]
 
     summary = f"Comprehensive advertising strategy for {company.name}'s {product.name} targeting {company.target_audience} in the {company.industry} industry. The campaign focuses on {ad_objective} with a mix of emotional and rational appeals across multiple channels."
@@ -221,7 +272,7 @@ def generate_mock_ad_ideas(company: CompanyInfo, product: ProductInfo, ad_object
 async def generate_ad_ideas(request: AdIdeasRequest):
     """
     Generate creative advertising ideas based on company and product information.
-    
+
     This endpoint analyzes the provided company and product details to create
     innovative advertising concepts, visual suggestions, and campaign strategies.
     """
@@ -231,13 +282,15 @@ async def generate_ad_ideas(request: AdIdeasRequest):
             product=request.product,
             ad_objective=request.ad_objective,
             budget_range=request.budget_range,
-            preferred_channels=request.preferred_channels
+            preferred_channels=request.preferred_channels,
         )
-        
+
         return response
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate ad ideas: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate ad ideas: {str(e)}"
+        )
 
 
 @router.get("/health")

@@ -17,7 +17,7 @@ if not HIGGSFIELD_API_KEY_ID or not HIGGSFIELD_API_KEY_SECRET:
     raise RuntimeError("Missing Credentials")
 
 # ---------- router ----------
-router = APIRouter()
+router = APIRouter(prefix="/text-to-video", tags=["text-to-video"])
 
 
 # ---------- models ----------
