@@ -52,6 +52,7 @@ async def generate_minimax_t2v(params: ModelParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/seedance-v1-lite-t2v")
 async def generate_minimax_t2v(params: ModelParams):
 
@@ -67,6 +68,7 @@ async def generate_minimax_t2v(params: ModelParams):
         raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def _pick_video_url(data: dict) -> str | None:
     """
