@@ -1,10 +1,10 @@
 import os
 import io
 import asyncio
+from typing import Literal, Union, Annotated
+
 import httpx
 from dotenv import load_dotenv
-from typing import Literal
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -21,17 +21,42 @@ router = APIRouter(prefix="/text-to-video", tags=["text-to-video"])
 
 
 # ---------- models ----------
-class ModelParams(BaseModel):
+class _BaseParams(BaseModel):
     prompt: str = Field(..., description="Text prompt")
-    duration: int = Field(6, description="Clip length in seconds")
-    resolution: str = Field("768", description="Video side length, e.g. 576, 720, 768")
-    # NOTE: keeping original field name to match your upstream payload
+    # keep the original upstream field name (misspelling) for compatibility
     enable_prompt_optimizier: bool = Field(True, description="Enable prompt optimizer")
 
 
-class GenerateVideoRequest(BaseModel):
-    model: Literal["minimax-t2v", "seedance-v1-lite-t2v"]
-    params: ModelParams
+# minimax-t2v: duration ∈ {6,10}, resolution ∈ {768,1080}
+class MiniMaxParams(_BaseParams):
+    duration: Literal[6, 10] = Field(6, description="Clip length in seconds (6 or 10)")
+    resolution: Literal["768", "1080"] = Field(
+        "768", description="Video side length (768 or 1080)"
+    )
+
+
+# seedance-v1-lite-t2v: duration ∈ {5,10}, resolution ∈ {468,720,1080}
+class SeedanceParams(_BaseParams):
+    duration: Literal[5, 10] = Field(5, description="Clip length in seconds (5 or 10)")
+    resolution: Literal["468", "720", "1080"] = Field(
+        "720", description="Video side length (468, 720, or 1080)"
+    )
+
+
+class _GenerateMini(BaseModel):
+    model: Literal["minimax-t2v"]
+    params: MiniMaxParams
+
+
+class _GenerateSeed(BaseModel):
+    model: Literal["seedance-v1-lite-t2v"]
+    params: SeedanceParams
+
+
+GenerateVideoRequest = Annotated[
+    Union[_GenerateMini, _GenerateSeed],
+    Field(discriminator="model"),
+]
 
 
 # ---------- helpers ----------
@@ -120,9 +145,9 @@ async def _poll_video_url(
     return None
 
 
-# ---------- (optional) legacy endpoints you already had ----------
+# ---------- optional legacy endpoints ----------
 @router.post("/minimax-t2v")
-async def generate_minimax_t2v(params: ModelParams):
+async def generate_minimax_t2v(params: MiniMaxParams):
     url = "https://platform.higgsfield.ai/generate/minimax-t2v"
     payload = {"params": params.model_dump()}
     try:
@@ -137,7 +162,7 @@ async def generate_minimax_t2v(params: ModelParams):
 
 
 @router.post("/seedance-v1-lite-t2v")
-async def generate_seedance_v1_lite_t2v(params: ModelParams):
+async def generate_seedance_v1_lite_t2v(params: SeedanceParams):
     url = "https://platform.higgsfield.ai/generate/seedance-v1-lite-t2v"
     payload = {"params": params.model_dump()}
     try:
@@ -185,7 +210,7 @@ async def wait_and_redirect_video(
 
 # ---------- unified endpoint (ONE CALL): submit -> poll -> return video ----------
 @router.post(
-    "/text-to-video/generate",
+    "/generate",  # NOTE: lives under /text-to-video/generate
     responses={
         200: {
             "content": {"video/*": {}, "application/json": {}},
@@ -221,17 +246,13 @@ async def generate_video(
             )
             submit.raise_for_status()
             job_set = submit.json()
-            job_set_id = job_set.get("id")
-            if not job_set_id:
-                # Some generators return the job-set in 'data' root; try that as a fallback
-                job_set_id = (job_set.get("data") or {}).get("id")
+            job_set_id = job_set.get("id") or (job_set.get("data") or {}).get("id")
             if not job_set_id:
                 raise HTTPException(status_code=502, detail="No job_set id in response")
 
             # 2) poll for video URL
             vid_url = await _poll_video_url(client, job_set_id, timeout, interval)
             if not vid_url:
-                # still processing — let the caller know and pass the id back
                 raise HTTPException(
                     status_code=202,
                     detail={
@@ -251,17 +272,13 @@ async def generate_video(
                 }
 
             # mode == "bytes": proxy the video and stream to caller (no CORS issues)
-            # Stream to avoid loading whole file into memory
             proxied = await client.get(vid_url, follow_redirects=True)
             proxied.raise_for_status()
-            media = proxied.headers.get("content-type", None)
-            if not media or not media.startswith("video/"):
-                # best-effort default
-                media = "video/mp4"
+            media = proxied.headers.get("content-type") or "video/mp4"
 
             return StreamingResponse(
                 io.BytesIO(proxied.content),
-                media_type=media,
+                media_type=media if media.startswith("video/") else "video/mp4",
                 headers={
                     "Cache-Control": "public, max-age=31536000",
                     "Content-Disposition": 'inline; filename="generated-video"',
